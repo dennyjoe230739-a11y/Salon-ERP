@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Salon ERP - Single File</title>
+<style>
+  :root{--accent:#d6336c;--muted:#666;--bg:#f7f7fb}
+  body{font-family:Inter,Segoe UI,Arial;background:var(--bg);margin:0;color:#222}
+  header{background:#fff;padding:12px 18px;display:flex;align-items:center;gap:12px;border-bottom:1px solid #e6e6ee}
+  header h1{font-size:18px;margin:0}
+  .container{display:flex;gap:18px;padding:18px}
+  nav{width:220px;background:#fff;padding:12px;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.04)}
+  main{flex:1}
+  .menu button{display:block;width:100%;margin:6px 0;padding:10px;border:0;background:transparent;text-align:left;border-radius:6px;cursor:pointer}
+  .card{background:#fff;padding:12px;border-radius:8px;box-shadow:0 1px 6px rgba(0,0,0,.04);margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th,td{padding:8px;border-bottom:1px solid #f0f0f5;text-align:left;font-size:13px}
+  .muted{color:var(--muted);font-size:13px}
+  .btn{background:var(--accent);color:#fff;padding:8px 10px;border-radius:6px;border:0;cursor:pointer}
+  input,select,textarea{padding:8px;border:1px solid #e6e6ee;border-radius:6px;width:100%;box-sizing:border-box}
+  .row{display:flex;gap:12px}
+  .col{flex:1}
+  .small{width:120px}
+  footer{padding:12px;text-align:center;color:var(--muted);font-size:13px}
+  .flex{display:flex;gap:8px;align-items:center}
+  canvas{max-width:100%}
+</style>
+</head>
+<body>
+<header>
+  <h1>Salon ERP — Himayatnagar, TG</h1>
+  <div class="muted">Local time: <span id="localTime"></span></div>
+  <div style="margin-left:auto" class="flex">
+    <button class="btn" id="exportBtn">Export JSON</button>
+    <input type="file" id="importFile" style="display:none" />
+    <button class="btn" id="importBtn" style="background:#444">Import</button>
+  </div>
+</header>
+
+<div class="container">
+  <nav>
+    <div class="menu">
+      <button data-view="dashboard">Dashboard</button>
+      <button data-view="clients">Clients</button>
+      <button data-view="appointments">Appointments</button>
+      <button data-view="inventory">Inventory / Services</button>
+      <button data-view="staff">Staff</button>
+      <button data-view="pos">POS / Billing</button>
+      <button data-view="reports">Reports</button>
+    </div>
+  </nav>
+
+  <main id="app">
+    <!-- Views injected here -->
+  </main>
+</div>
+
+<footer>Salon ERP — single-file demo • Data stored locally in your browser</footer>
+
+<script>
+/* ---------- Utilities & Storage ---------- */
+const STORE_KEY='salon_erp_v1';
+const nowLocal=()=>new Date();
+document.getElementById('localTime').textContent = new Date().toLocaleString();
+
+function loadStore(){
+  const raw=localStorage.getItem(STORE_KEY);
+  if(!raw) return {clients:[],appointments:[],inventory:[],staff:[],sales:[]};
+  try{return JSON.parse(raw)}catch(e){return {clients:[],appointments:[],inventory:[],staff:[],sales:[]}}
+}
+function saveStore(s){localStorage.setItem(STORE_KEY,JSON.stringify(s))}
+
+let store = loadStore();
+
+/* ---------- Simple Router ---------- */
+const app = document.getElementById('app');
+function render(view){
+  if(view==='dashboard') return renderDashboard();
+  if(view==='clients') return renderClients();
+  if(view==='appointments') return renderAppointments();
+  if(view==='inventory') return renderInventory();
+  if(view==='staff') return renderStaff();
+  if(view==='pos') return renderPOS();
+  if(view==='reports') return renderReports();
+}
+document.querySelectorAll('nav .menu button').forEach(b=>{
+  b.addEventListener('click',()=>{render(b.dataset.view)})
+});
+render('dashboard');
+
+/* ---------- Components / Views ---------- */
+
+function renderDashboard(){
+  app.innerHTML = `
+    <div class="card"><h2>Dashboard</h2>
+      <div class="row">
+        <div class="col card"><strong>Clients</strong><div class="muted">${store.clients.length}</div></div>
+        <div class="col card"><strong>Appointments</strong><div class="muted">${store.appointments.length}</div></div>
+        <div class="col card"><strong>Inventory Items</strong><div class="muted">${store.inventory.length}</div></div>
+        <div class="col card"><strong>Sales</strong><div class="muted">${store.sales.length} bills</div></div>
+      </div>
+    </div>
+    <div class="card"><h3>Upcoming Appointments (next 7 days)</h3><div id="upcoming"></div></div>
+  `;
+  const upcoming = store.appointments
+    .filter(a=> new Date(a.datetime) >= new Date())
+    .sort((a,b)=>new Date(a.datetime)-new Date(b.datetime))
+    .slice(0,8);
+  const el = document.getElementById('upcoming');
+  if(!upcoming.length) el.innerHTML='<div class="muted">No upcoming appointments</div>';
+  else{
+    el.innerHTML = '<table><thead><tr><th>When</th><th>Client</th><th>Service</th><th>Staff</th></tr></thead><tbody>' +
+      upcoming.map(a=>`<tr><td>${new Date(a.datetime).toLocaleString()}</td><td>${a.clientName}</td><td>${a.service}</td><td>${a.staffName||'-'}</td></tr>`).join('') +
+      '</tbody></table>';
+  }
+}
+
+/* Clients */
+function renderClients(){
+  app.innerHTML = `
+    <div class="card"><h2>Clients</h2>
+      <div class="row"><div class="col"><input id="clientSearch" placeholder="Search by name or phone" /></div>
+      <div><button class="btn" id="addClientBtn">Add Client</button></div></div>
+      <div id="clientsList"></div>
+    </div>
+  `;
+  document.getElementById('addClientBtn').onclick = ()=>openClientForm();
+  document.getElementById('clientSearch').oninput = ()=>drawClients();
+  drawClients();
+}
+function drawClients(){
+  const q = document.getElementById('clientSearch').value.toLowerCase();
+  const list = store.clients.filter(c=> (c.name+c.phone+c.email).toLowerCase().includes(q));
+  const el = document.getElementById('clientsList');
+  if(!list.length) el.innerHTML='<div class="muted card">No clients</div>';
+  else{
+    el.innerHTML = '<table><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th></th></tr></thead><tbody>' +
+      list.map((c,i)=>`<tr><td>${c.name}</td><td>${c.phone||''}</td><td>${c.email||''}</td><td><button data-i="${i}" class="btn small" onclick="editClient(${i})">Edit</button></td></tr>`).join('') +
+      '</tbody></table>';
+  }
+}
+window.editClient = function(i){
+  const client = store.clients[i];
+  openClientForm(client,i);
+}
+function openClientForm(client=null,index=null){
+  const name = client?client.name:'';
+  const phone = client?client.phone:'';
+  const email = client?client.email:'';
+  app.innerHTML = `
+    <div class="card"><h2>${client?'Edit':'Add'} Client</h2>
+      <div class="row"><div class="col"><label>Name</label><input id="cname" value="${name}" /></div>
+      <div class="col"><label>Phone</label><input id="cphone" value="${phone}" /></div></div>
+      <div><label>Email</label><input id="cemail" value="${email}" /></div>
+      <div style="margin-top:10px"><button class="btn" id="saveClient">Save</button> <button id="cancel" class="btn" style="background:#888">Cancel</button></div>
+    </div>
+  `;
+  document.getElementById('cancel').onclick = ()=>render('clients');
+  document.getElementById('saveClient').onclick = ()=>{
+    const obj = {name:document.getElementById('cname').value,phone:document.getElementById('cphone').value,email:document.getElementById('cemail').value, id: client?client.id:Date.now()};
+    if(index==null) store.clients.push(obj); else store.clients[index]=obj;
+    saveStore(store); render('clients');
+  }
+}
+
+/* Appointments */
+function renderAppointments(){
+  app.innerHTML = `
+    <div class="card"><h2>Appointments</h2>
+      <div class="row"><div class="col"><select id="apClient">${store.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
+      <div class="col"><select id="apService">${store.inventory.map(i=>`<option value="${i.id}">${i.name} - ₹${i.price}</option>`).join('')}</select></div></div>
+      <div class="row"><div class="col"><input type="datetime-local" id="apDate" /></div><div class="col"><select id="apStaff"><option value="">Unassigned</option>${store.staff.map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}</select></div></div>
+      <div style="margin-top:10px"><button class="btn" id="saveAp">Save Appointment</button></div>
+      <div id="apList" style="margin-top:12px"></div>
+    </div>
+  `;
+  document.getElementById('saveAp').onclick = ()=>{
+    const clientId = document.getElementById('apClient').value;
+    const serviceId = document.getElementById('apService').value;
+    const dt = document.getElementById('apDate').value;
+    const staffId = document.getElementById('apStaff').value;
+    if(!clientId||!serviceId||!dt){alert('Select client, service and date');return;}
+    const client = store.clients.find(c=>c.id==clientId);
+    const service = store.inventory.find(i=>i.id==serviceId);
+    const staff = store.staff.find(s=>s.id==staffId) || {};
+    store.appointments.push({id:Date.now(),clientId,clientName:client.name,service:service.name,serviceId,staffId,staffName:staff.name||'',datetime:dt,status:'scheduled'});
+    saveStore(store); renderAppointments();
+  }
+  drawApList();
+}
+function drawApList(){
+  const el = document.getElementById('apList');
+  if(!store.appointments.length) el.innerHTML='<div class="muted">No appointments</div>';
+  else{
+    el.innerHTML = '<table><thead><tr><th>When</th><th>Client</th><th>Service</th><th>Staff</th><th>Status</th><th></th></tr></thead><tbody>' +
+      store.appointments.map((a,i)=>`<tr><td>${new Date(a.datetime).toLocaleString()}</td><td>${a.clientName}</td><td>${a.service}</td><td>${a.staffName||'-'}</td><td>${a.status}</td><td><button class="btn small" onclick="completeAp(${i})">Complete</button></td></tr>`).join('') +
+      '</tbody></table>';
+  }
+}
+window.completeAp = function(i){
+  const ap = store.appointments[i];
+  ap.status='completed';
+  saveStore(store);
+  render('appointments');
+}
+
+/* Inventory / Services */
+function renderInventory(){
+  app.innerHTML = `
+    <div class="card"><h2>Inventory / Services</h2>
+      <div class="row"><div class="col"><input id="invName" placeholder="Service or product name" /></div>
+      <div class="col small"><input id="invPrice" placeholder="Price" /></div>
+      <div class="col small"><input id="invQty" placeholder="Qty" /></div>
+      <div><button class="btn" id="addInv">Add</button></div></div>
+      <div id="invList" style="margin-top:12px"></div>
+    </div>
+  `;
+  document.getElementById('addInv').onclick = ()=>{
+    const name=document.getElementById('invName').value;
+    const price=parseFloat(document.getElementById('invPrice').value)||0;
+    const qty=parseInt(document.getElementById('invQty').value)||0;
+    if(!name){alert('Name required');return;}
+    store.inventory.push({id:Date.now().toString(),name,price,qty});
+    saveStore(store); renderInventory();
+  }
+  drawInv();
+}
+function drawInv(){
+  const el=document.getElementById('invList');
+  if(!store.inventory.length) el.innerHTML='<div class="muted">No items</div>';
+  else{
+    el.innerHTML = '<table><thead><tr><th>Name</th><th>Price</th><th>Qty</th><th></th></tr></thead><tbody>' +
+      store.inventory.map((it,i)=>`<tr><td>${it.name}</td><td>₹${it.price}</td><td>${it.qty}</td><td><button class="btn small" onclick="sellItem(${i})">Sell</button></td></tr>`).join('') +
+      '</tbody></table>';
+  }
+}
+window.sellItem = function(i){
+  const it = store.inventory[i];
+  if(it.qty<=0){alert('Out of stock');return;}
+  const qty = parseInt(prompt('Quantity to sell',1));
+  if(!qty||qty<1) return;
+  it.qty -= qty;
+  store.sales.push({id:Date.now(),items:[{id:it.id,name:it.name,price:it.price,qty}],total:it.price*qty,date:new Date().toISOString()});
+  saveStore(store); renderInventory();
+}
+
+/* Staff */
+function renderStaff(){
+  app.innerHTML = `
+    <div class="card"><h2>Staff</h2>
+      <div class="row"><div class="col"><input id="sname" placeholder="Name" /></div><div><button class="btn" id="addStaff">Add</button></div></div>
+      <div id="staffList" style="margin-top:12px"></div>
+    </div>
+  `;
+  document.getElementById('addStaff').onclick = ()=>{
+    const name=document.getElementById('sname').value;
+    if(!name) return;
+    store.staff.push({id:Date.now().toString(),name});
+    saveStore(store); renderStaff();
+  }
+  drawStaff();
+}
+function drawStaff(){
+  const el=document.getElementById('staffList');
+  if(!store.staff.length) el.innerHTML='<div class="muted">No staff</div>';
+  else el.innerHTML = '<ul>' + store.staff.map(s=>`<li>${s.name}</li>`).join('') + '</ul>';
+}
+
+/* POS / Billing */
+function renderPOS(){
+  app.innerHTML = `
+    <div class="card"><h2>POS / Billing</h2>
+      <div class="row"><div class="col"><select id="posClient"><option value="">Walk-in</option>${store.clients.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}</select></div>
+      <div class="col"><select id="posItem">${store.inventory.map(i=>`<option value="${i.id}">${i.name} - ₹${i.price} (${i.qty})</option>`).join('')}</select></div>
+      <div class="col small"><input id="posQty" type="number" value="1" /></div>
+      <div><button class="btn" id="addToCart">Add</button></div></div>
+      <div id="cart" style="margin-top:12px"></div>
+    </div>
+  `;
+  window.cart = [];
+  document.getElementById('addToCart').onclick = ()=>{
+    const id=document.getElementById('posItem').value;
+    const qty=parseInt(document.getElementById('posQty').value)||1;
+    const it = store.inventory.find(x=>x.id==id);
+    if(!it){alert('Select item');return;}
+    if(it.qty < qty){alert('Insufficient stock');return;}
+    cart.push({id:it.id,name:it.name,price:it.price,qty});
+    drawCart();
+  }
+  function drawCart(){
+    const el=document.getElementById('cart');
+    if(!cart.length) el.innerHTML='<div class="muted">Cart empty</div>';
+    else{
+      const total = cart.reduce((s,i)=>s+i.price*i.qty,0);
+      el.innerHTML = '<table><thead><tr><th>Item</th><th>Qty</th><th>Price</th></tr></thead><tbody>' +
+        cart.map((c,i)=>`<tr><td>${c.name}</td><td>${c.qty}</td><td>₹${c.price*c.qty}</td></tr>`).join('') +
+        `</tbody></table><div style="margin-top:8px"><strong>Total: ₹${total}</strong> <button class="btn" id="payBtn">Pay</button></div>`;
+      document.getElementById('payBtn').onclick = ()=>completeSale(total);
+    }
+  }
+  function completeSale(total){
+    if(!confirm('Complete sale for ₹'+total+'?')) return;
+    // reduce stock
+    cart.forEach(ci=>{
+      const it = store.inventory.find(x=>x.id==ci.id);
+      if(it) it.qty -= ci.qty;
+    });
+    const bill = {id:Date.now(),clientId:document.getElementById('posClient').value||null,items:cart,total,date:new Date().toISOString()};
+    store.sales.push(bill);
+    saveStore(store);
+    alert('Sale recorded. Receipt will open.');
+    const receipt = `Receipt\nTotal: ₹${total}\nItems:\n` + cart.map(i=>`${i.name} x${i.qty} = ₹${i.price*i.qty}`).join('\n');
+    const w = window.open('','_blank'); w.document.write('<pre>'+receipt+'</pre>'); w.print();
+    cart = []; render('pos');
+  }
+}
+
+/* Reports */
+function renderReports(){
+  app.innerHTML = `
+    <div class="card"><h2>Reports</h2>
+      <div class="row"><div class="col"><label>From</label><input type="date" id="rfrom" /></div><div class="col"><label>To</label><input type="date" id="rto" /></div><div><button class="btn" id="runReport">Run</button></div></div>
+      <div id="reportArea" style="margin-top:12px"></div>
+    </div>
+  `;
+  document.getElementById('runReport').onclick = ()=>{
+    const from = document.getElementById('rfrom').value ? new Date(document.getElementById('rfrom').value) : new Date(0);
+    const to = document.getElementById('rto').value ? new Date(document.getElementById('rto').value+'T23:59:59') : new Date();
+    const sales = store.sales.filter(s=> new Date(s.date) >= from && new Date(s.date) <= to);
+    const total = sales.reduce((s,x)=>s+x.total,0);
+    const items = {};
+    sales.forEach(s=> s.items.forEach(it=> { items[it.name] = (items[it.name]||0) + it.qty }));
+    document.getElementById('reportArea').innerHTML = `<div class="card"><strong>Total Sales:</strong> ₹${total} <div class="muted">${sales.length} bills</div></div>
+      <div class="card"><h4>Top items</h4><ul>${Object.entries(items).sort((a,b)=>b[1]-a[1]).map(e=>`<li>${e[0]} — ${e[1]}</li>`).join('')}</ul></div>`;
+  }
+}
+
+/* Export / Import */
+document.getElementById('exportBtn').onclick = ()=>{
+  const data = JSON.stringify(store, null, 2);
+  const blob = new Blob([data],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='salon-erp-backup.json'; a.click(); URL.revokeObjectURL(url);
+}
+document.getElementById('importBtn').onclick = ()=>document.getElementById('importFile').click();
+document.getElementById('importFile').onchange = (e)=>{
+  const f = e.target.files[0]; if(!f) return;
+  const reader = new FileReader(); reader.onload = ()=>{ try{ store = JSON.parse(reader.result); saveStore(store); alert('Imported'); render('dashboard'); }catch(err){alert('Invalid file')} };
+  reader.readAsText(f);
+}
+
+/* Initialize default demo data if empty */
+if(!store.inventory.length && !store.clients.length && !store.staff.length){
+  store.clients.push({id:'c1',name:'Ravi',phone:'9000000001',email:''});
+  store.staff.push({id:'s1',name:'Priya'});
+  store.inventory.push({id:'i1',name:'Haircut',price:250,qty:50});
+  saveStore(store);
+}
+</script>
+</body>
+</html>
